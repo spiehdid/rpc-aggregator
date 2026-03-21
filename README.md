@@ -113,20 +113,65 @@ See [config.example.yaml](config.example.yaml) for a full example.
 
 ### Key parameters
 
+#### Server
+
 | Parameter | Default | Description |
 |---|---|---|
 | `server.listen` | `:8080` | Consumer-facing port (HTTP + WS) |
 | `server.admin_listen` | `:8081` | Admin API + dashboard port |
-| `scoring.weights.latency` | `0.4` | Weight for node latency |
+| `server.request_timeout` | `30s` | Max time for a single RPC request |
+| `server.drain_timeout` | `30s` | Grace period for in-flight requests on shutdown |
+| `server.admin_token` | `""` | Bearer token for admin API (empty = no auth, warns at startup) |
+| `server.allowed_origins` | `[]` | WS origin allowlist (empty = allow all) |
+
+#### Scoring & routing
+
+| Parameter | Default | Description |
+|---|---|---|
+| `scoring.weights.latency` | `0.4` | Weight for node latency in scoring formula |
 | `scoring.weights.block_height` | `0.3` | Weight for block height freshness |
 | `scoring.weights.error_rate` | `0.3` | Weight for error rate |
-| `scoring.weights.paid_penalty` | `0.5` | Cost multiplier for paid nodes |
-| `circuit_breaker.error_threshold` | `0.5` | Error rate to open circuit |
+| `scoring.weights.paid_penalty` | `0.5` | Cost multiplier for paid nodes (0.0-1.0, lower = less likely to use) |
+
+#### Health checks & circuit breaker
+
+| Parameter | Default | Description |
+|---|---|---|
+| `health_check.interval` | `5s` | How often to poll each node for block height and latency |
+| `health_check.timeout` | `3s` | Max time to wait for a health check response |
+| `circuit_breaker.error_threshold` | `0.5` | Error rate (0.0-1.0) that triggers circuit open |
+| `circuit_breaker.window` | `30s` | Sliding window for error rate calculation |
+| `circuit_breaker.recovery_timeout` | `30s` | How long to wait before probing an open circuit |
+
+#### Retry & fan-out
+
+| Parameter | Default | Description |
+|---|---|---|
+| `retry.max_attempts` | `3` | Max retry attempts for failed requests (each on a different node) |
+| `retry.critical_fan_out` | `3` | Number of nodes to send critical methods to in parallel |
+| `retry.max_batch_size` | `100` | Max items in a JSON-RPC batch request |
+
+#### Rate limiting
+
+| Parameter | Default | Description |
+|---|---|---|
 | `rate_limit.enabled` | `false` | Enable rate limiting |
-| `rate_limit.trust_x_forwarded_for` | `false` | Trust XFF header (enable behind proxy) |
-| `server.admin_token` | `""` | Bearer token for admin API (empty = no auth) |
-| `server.allowed_origins` | `[]` | WS origin allowlist (empty = allow all) |
-| `websocket.max_connections` | `1000` | Max WS connections |
+| `rate_limit.trust_x_forwarded_for` | `false` | Trust X-Forwarded-For header (enable only behind a trusted proxy) |
+| `rate_limit.default.requests_per_second` | `100` | Per-IP request rate for unauthenticated clients |
+| `rate_limit.default.burst` | `200` | Burst capacity for per-IP rate limiting |
+
+#### WebSocket
+
+| Parameter | Default | Description |
+|---|---|---|
+| `websocket.max_connections` | `1000` | Max concurrent consumer WS connections |
+| `websocket.max_subscriptions_per_conn` | `100` | Max subscriptions per WS connection |
+| `websocket.max_total_subscriptions` | `10000` | Max total subscriptions across all connections |
+| `websocket.max_message_size` | `65536` | Max inbound WS message size (bytes) |
+| `websocket.send_queue_size` | `256` | Per-consumer send buffer (events dropped if full) |
+| `websocket.write_timeout` | `5s` | Max time to write a message to a consumer |
+| `websocket.ping_interval` | `30s` | Keepalive ping interval |
+| `websocket.pong_timeout` | `10s` | Max time to wait for pong response |
 
 ### Adding a chain
 
