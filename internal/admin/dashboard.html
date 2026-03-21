@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RPC Aggregator Dashboard</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:#0b0f1a;color:#cbd5e1;font-size:13px}
+
+.header{background:#0f172a;padding:12px 24px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1e293b}
+.header h1{font-size:16px;color:#f1f5f9;font-weight:600}
+.header h1 .dot{font-size:18px;margin-right:4px}
+.dot-green{color:#4ade80}
+.dot-yellow{color:#fbbf24}
+.dot-red{color:#f87171}
+.header .right{display:flex;align-items:center;gap:12px;font-size:12px}
+.pulse{animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:.4}50%{opacity:1}}
+.uptime{color:#64748b}
+
+.tabs{background:#0f172a;padding:0 24px;display:flex;gap:0;border-bottom:1px solid #1e293b;overflow-x:auto}
+.tab{padding:10px 16px;cursor:pointer;color:#64748b;font-size:13px;border-bottom:2px solid transparent;white-space:nowrap;transition:all .2s}
+.tab:hover{color:#94a3b8}
+.tab.active{color:#38bdf8;border-bottom-color:#38bdf8}
+
+.content{padding:20px 24px;display:none}
+.content.active{display:block}
+
+.stats-row{display:grid;gap:12px;margin-bottom:20px}
+.stats-4{grid-template-columns:repeat(4,1fr)}
+.stats-5{grid-template-columns:repeat(4,1fr)}
+.stat-card{background:#1e293b;border-radius:8px;padding:14px;border:1px solid #334155}
+.stat-label{font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.stat-value{font-size:22px;font-weight:700;color:#f1f5f9}
+.stat-sub{font-size:11px;color:#64748b;margin-top:4px}
+.blue{color:#38bdf8}
+.green{color:#4ade80}
+.yellow{color:#fbbf24}
+.red{color:#f87171}
+
+.cache-bar{background:#0f172a;border-radius:4px;height:6px;overflow:hidden;margin-top:8px}
+.cache-bar-fill{height:100%;border-radius:4px;background:linear-gradient(90deg,#4ade80,#38bdf8);transition:width .5s}
+
+.chains-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+.chain-card{background:#1e293b;border-radius:8px;padding:16px;border:1px solid #334155}
+.chain-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.chain-name{font-size:14px;font-weight:600;color:#f1f5f9;cursor:pointer}
+.chain-name:hover{color:#38bdf8}
+.chain-badge{font-size:11px;padding:3px 10px;border-radius:12px;font-weight:500}
+.badge-green{background:#166534;color:#4ade80}
+.badge-yellow{background:#713f12;color:#fbbf24}
+.badge-red{background:#7f1d1d;color:#f87171}
+
+.node-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #0f172a;font-size:12px}
+.node-row:last-child{border-bottom:none}
+.node-row.open{opacity:.5}
+.nr-url{color:#94a3b8;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.nr-lat{width:55px;text-align:right}
+.nr-height{width:85px;text-align:right;color:#64748b;font-family:monospace;font-size:11px}
+.nr-score{width:36px;text-align:right;font-weight:600}
+.nr-circuit{width:12px;text-align:center}
+
+.section-title{font-size:13px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.chain-title{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.chain-title h2{font-size:20px;color:#f1f5f9;font-weight:600}
+.chain-meta{color:#64748b;font-size:12px}
+
+.node-table{width:100%;border-collapse:collapse;background:#1e293b;border-radius:8px;overflow:hidden;border:1px solid #334155}
+.node-table th{text-align:left;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;padding:10px 14px;background:#0f172a;border-bottom:1px solid #334155}
+.node-table th.r{text-align:right}
+.node-table td{padding:10px 14px;border-bottom:1px solid #0f172a;font-size:12px}
+.node-table td.r{text-align:right}
+.node-table tr:last-child td{border-bottom:none}
+.node-table tr:hover td{background:#0f172a}
+.node-table tr.open td{opacity:.5}
+.node-url-main{color:#e2e8f0;font-weight:500}
+.node-url-full{color:#64748b;font-size:11px;display:block;margin-top:2px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.lat-bar{display:flex;align-items:center;gap:6px;justify-content:flex-end}
+.lat-bar-bg{width:50px;height:4px;background:#0f172a;border-radius:2px;overflow:hidden}
+.lat-bar-fill{height:100%;border-radius:2px}
+
+.circuit-badge{font-size:11px;padding:2px 8px;border-radius:10px;font-weight:500}
+.cb-closed{background:#166534;color:#4ade80}
+.cb-open{background:#7f1d1d;color:#f87171}
+.cb-half{background:#713f12;color:#fbbf24}
+
+.btn{font-size:11px;padding:3px 8px;border-radius:4px;border:1px solid #334155;background:#0f172a;color:#94a3b8;cursor:pointer}
+.btn:hover{background:#1e293b;color:#e2e8f0}
+.btn-danger{border-color:#7f1d1d;color:#f87171}
+.btn-danger:hover{background:#7f1d1d;color:#fecaca}
+.actions{display:flex;gap:4px}
+
+.toast{position:fixed;top:16px;right:16px;background:#7f1d1d;color:#fecaca;padding:12px 20px;border-radius:8px;font-size:13px;z-index:100;display:none;border:1px solid #991b1b;max-width:400px}
+.toast.show{display:block;animation:fadeIn .3s}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-10px)}to{opacity:1;transform:translateY(0)}}
+
+@media(max-width:768px){
+  .stats-row{grid-template-columns:repeat(2,1fr)}
+  .chains-grid{grid-template-columns:1fr}
+  .header{padding:12px 16px}
+  .tabs{padding:0 16px}
+  .content{padding:16px}
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span class="dot dot-green" id="health-dot">●</span> RPC Aggregator</h1>
+  <div class="right">
+    <span style="color:#475569" class="pulse">◉</span>
+    <span style="color:#475569">Auto-refresh 5s</span>
+    <span class="uptime" id="uptime"></span>
+  </div>
+</div>
+
+<div class="tabs" id="tabs">
+  <div class="tab active" data-tab="overview">Overview</div>
+</div>
+
+<div class="content active" id="tab-overview">
+  <div class="stats-row stats-4" id="overview-stats"></div>
+  <div class="section-title">Chains</div>
+  <div class="chains-grid" id="chains-grid"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let data = null;
+let activeTab = 'overview';
+
+async function fetchStatus() {
+  try {
+    const resp = await fetch('/admin/status');
+    data = await resp.json();
+    render();
+  } catch (e) {
+    showToast('Failed to fetch status: ' + e.message);
+  }
+}
+
+function render() {
+  if (!data) return;
+  document.getElementById('uptime').textContent = 'Uptime: ' + data.uptime;
+  renderTabs();
+  renderHealthDot();
+  if (activeTab === 'overview') {
+    renderOverview();
+  } else {
+    renderChainDetail(activeTab);
+  }
+}
+
+function renderHealthDot() {
+  const dot = document.getElementById('health-dot');
+  let allHealthy = true;
+  let anyDown = false;
+  for (const [, chain] of Object.entries(data.chains)) {
+    if (chain.healthy_nodes === 0) anyDown = true;
+    if (chain.healthy_nodes < chain.total_nodes) allHealthy = false;
+  }
+  if (anyDown) { dot.className = 'dot dot-red'; }
+  else if (!allHealthy) { dot.className = 'dot dot-yellow'; }
+  else { dot.className = 'dot dot-green'; }
+}
+
+function renderTabs() {
+  const container = document.getElementById('tabs');
+  const chains = Object.keys(data.chains).sort();
+  const existing = container.querySelectorAll('[data-tab]');
+  const existingTabs = new Set();
+  existing.forEach(t => existingTabs.add(t.dataset.tab));
+
+  for (const name of chains) {
+    if (!existingTabs.has(name)) {
+      const tab = document.createElement('div');
+      tab.className = 'tab' + (activeTab === name ? ' active' : '');
+      tab.dataset.tab = name;
+      tab.textContent = capitalize(name);
+      tab.onclick = () => switchTab(name);
+      container.appendChild(tab);
+    }
+  }
+}
+
+function switchTab(name) {
+  activeTab = name;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+  document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+
+  if (name === 'overview') {
+    document.getElementById('tab-overview').classList.add('active');
+    renderOverview();
+  } else {
+    let el = document.getElementById('tab-' + name);
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'content active';
+      el.id = 'tab-' + name;
+      document.body.insertBefore(el, document.getElementById('toast'));
+    }
+    el.classList.add('active');
+    renderChainDetail(name);
+  }
+}
+
+function renderOverview() {
+  const chains = data.chains;
+  let totalHealthy = 0, totalNodes = 0, totalHits = 0, totalOps = 0, latencySum = 0, latencyCount = 0, circuitOpen = 0;
+
+  for (const [, c] of Object.entries(chains)) {
+    totalHealthy += c.healthy_nodes;
+    totalNodes += c.total_nodes;
+    if (c.cache_stats) {
+      const ops = Math.round(c.cache_stats.hit_rate > 0 ? c.cache_stats.entries / c.cache_stats.hit_rate : 0);
+      totalHits += Math.round(c.cache_stats.hit_rate * (ops || 1));
+      totalOps += ops || 1;
+    }
+    for (const n of c.nodes) {
+      if (n.circuit === 'open') { circuitOpen++; }
+      else { latencySum += n.latency_ms; latencyCount++; }
+    }
+  }
+
+  const cacheRate = totalOps > 0 ? (totalHits / totalOps * 100).toFixed(1) : '0.0';
+  const avgLatency = latencyCount > 0 ? Math.round(latencySum / latencyCount) : 0;
+
+  document.getElementById('overview-stats').innerHTML = `
+    <div class="stat-card">
+      <div class="stat-label">Cache Hit Rate</div>
+      <div class="stat-value green">${cacheRate}%</div>
+      <div class="cache-bar"><div class="cache-bar-fill" style="width:${cacheRate}%"></div></div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Latency</div>
+      <div class="stat-value ${avgLatency < 50 ? 'green' : avgLatency < 100 ? 'yellow' : 'red'}">${avgLatency}ms</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Healthy Nodes</div>
+      <div class="stat-value green">${totalHealthy} <span style="font-size:14px;color:#64748b">/ ${totalNodes}</span></div>
+      <div class="stat-sub">${Object.keys(chains).length} chains active</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Circuit Open</div>
+      <div class="stat-value ${circuitOpen > 0 ? 'red' : 'green'}">${circuitOpen}</div>
+    </div>
+  `;
+
+  const grid = document.getElementById('chains-grid');
+  grid.innerHTML = '';
+  for (const [name, chain] of Object.entries(chains).sort()) {
+    const badgeClass = chain.healthy_nodes === 0 ? 'badge-red' : chain.healthy_nodes < chain.total_nodes ? 'badge-yellow' : 'badge-green';
+    let nodesHtml = '';
+    for (const n of chain.nodes) {
+      const isOpen = n.circuit === 'open';
+      const shortUrl = extractHost(n.url);
+      const latColor = isOpen ? 'red' : n.latency_ms < 50 ? 'green' : n.latency_ms < 100 ? 'yellow' : 'red';
+      nodesHtml += `
+        <div class="node-row ${isOpen ? 'open' : ''}">
+          <span class="nr-url">${shortUrl}</span>
+          <span class="nr-lat ${latColor}">${isOpen ? '—' : n.latency_ms + 'ms'}</span>
+          <span class="nr-height">${isOpen ? '—' : '#' + n.block_height.toLocaleString()}</span>
+          <span class="nr-score ${n.score > 0.7 ? 'green' : n.score > 0.4 ? 'yellow' : 'red'}">${n.score.toFixed(2)}</span>
+          <span class="nr-circuit ${n.circuit === 'closed' ? 'green' : n.circuit === 'half-open' ? 'yellow' : 'red'}">●</span>
+        </div>`;
+    }
+
+    grid.innerHTML += `
+      <div class="chain-card">
+        <div class="chain-header">
+          <span class="chain-name" onclick="switchTab('${name}')">${capitalize(name)}</span>
+          <span class="chain-badge ${badgeClass}">${chain.healthy_nodes}/${chain.total_nodes} healthy</span>
+        </div>
+        ${nodesHtml}
+      </div>`;
+  }
+}
+
+function renderChainDetail(name) {
+  const chain = data.chains[name];
+  if (!chain) return;
+  const el = document.getElementById('tab-' + name);
+  if (!el) return;
+
+  let avgLat = 0, latCount = 0;
+  for (const n of chain.nodes) {
+    if (n.circuit !== 'open') { avgLat += n.latency_ms; latCount++; }
+  }
+  avgLat = latCount > 0 ? Math.round(avgLat / latCount) : 0;
+  const cacheRate = (chain.cache_stats.hit_rate * 100).toFixed(1);
+
+  let rowsHtml = '';
+  for (const n of chain.nodes) {
+    const isOpen = n.circuit === 'open';
+    const isHalf = n.circuit === 'half-open';
+    const shortUrl = extractHost(n.url);
+    const latColor = isOpen ? '' : n.latency_ms < 50 ? '#4ade80' : n.latency_ms < 100 ? '#fbbf24' : '#f87171';
+    const latPct = isOpen ? 0 : Math.min(n.latency_ms / 200 * 100, 100);
+    const errColor = n.error_rate < 0.02 ? 'green' : n.error_rate < 0.05 ? 'yellow' : 'red';
+    const scoreColor = n.score > 0.7 ? 'green' : n.score > 0.4 ? 'yellow' : 'red';
+    const cbClass = n.circuit === 'closed' ? 'cb-closed' : n.circuit === 'half-open' ? 'cb-half' : 'cb-open';
+
+    let actions = '';
+    if (isOpen || isHalf) {
+      actions += `<button class="btn" onclick="resetCircuit('${name}','${n.id}')">Reset</button>`;
+    }
+    actions += `<button class="btn btn-danger" onclick="removeNode('${name}','${n.id}')">Remove</button>`;
+
+    rowsHtml += `
+      <tr class="${isOpen ? 'open' : ''}">
+        <td><span class="node-url-main">${shortUrl}</span><span class="node-url-full">${n.url}</span></td>
+        <td class="r"><div class="lat-bar">${isOpen ? '<span class="red">—</span>' :
+          `<div class="lat-bar-bg"><div class="lat-bar-fill" style="width:${latPct}%;background:${latColor}"></div></div><span style="color:${latColor}">${n.latency_ms}ms</span>`
+        }</div></td>
+        <td class="r" style="font-family:monospace;color:#94a3b8">${isOpen ? '—' : '#' + n.block_height.toLocaleString()}</td>
+        <td class="r"><span class="${errColor}">${(n.error_rate * 100).toFixed(1)}%</span></td>
+        <td class="r"><span class="${scoreColor}" style="font-weight:700">${n.score.toFixed(2)}</span></td>
+        <td><span class="circuit-badge ${cbClass}">${n.circuit}</span></td>
+        <td><div class="actions">${actions}</div></td>
+      </tr>`;
+  }
+
+  el.innerHTML = `
+    <div class="chain-title">
+      <h2>${capitalize(name)}</h2>
+      <span class="chain-badge ${chain.healthy_nodes === chain.total_nodes ? 'badge-green' : chain.healthy_nodes === 0 ? 'badge-red' : 'badge-yellow'}">${chain.healthy_nodes}/${chain.total_nodes} healthy</span>
+      <span class="chain-meta">Best block: #${chain.best_block_height.toLocaleString()}</span>
+    </div>
+    <div class="stats-row stats-4" style="grid-template-columns:repeat(3,1fr)">
+      <div class="stat-card">
+        <div class="stat-label">Cache Hit Rate</div>
+        <div class="stat-value green">${cacheRate}%</div>
+        <div class="cache-bar"><div class="cache-bar-fill" style="width:${cacheRate}%"></div></div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Avg Latency</div>
+        <div class="stat-value ${avgLat < 50 ? 'green' : avgLat < 100 ? 'yellow' : 'red'}">${avgLat}ms</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Best Block Height</div>
+        <div class="stat-value blue">#${chain.best_block_height.toLocaleString()}</div>
+      </div>
+    </div>
+    <div class="section-title">Nodes</div>
+    <table class="node-table">
+      <thead><tr>
+        <th>Node</th><th class="r">Latency</th><th class="r">Block Height</th>
+        <th class="r">Error Rate</th><th class="r">Score</th><th>Circuit</th><th>Actions</th>
+      </tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  `;
+}
+
+async function resetCircuit(chain, nodeId) {
+  try {
+    const resp = await fetch('/admin/chains/' + chain + '/nodes/' + encodeURIComponent(nodeId) + '/reset', { method: 'POST' });
+    if (!resp.ok) throw new Error(await resp.text());
+    fetchStatus();
+  } catch (e) {
+    showToast('Reset failed: ' + e.message);
+  }
+}
+
+async function removeNode(chain, nodeId) {
+  if (!confirm('Remove node ' + nodeId + ' from ' + chain + '?')) return;
+  try {
+    const resp = await fetch('/admin/chains/' + chain + '/nodes/' + encodeURIComponent(nodeId), { method: 'DELETE' });
+    if (!resp.ok) throw new Error(await resp.text());
+    fetchStatus();
+  } catch (e) {
+    showToast('Remove failed: ' + e.message);
+  }
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 5000);
+}
+
+function extractHost(url) {
+  try { return new URL(url).hostname.replace(/^(www\.|rpc\.|polygon-|arbitrum-|optimism-|avalanche-|base-)/, '').split('.').slice(-2).join('.'); }
+  catch { return url; }
+}
+
+function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+// Init
+document.querySelector('[data-tab="overview"]').onclick = () => switchTab('overview');
+fetchStatus();
+setInterval(fetchStatus, 5000);
+</script>
+</body>
+</html>

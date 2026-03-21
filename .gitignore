@@ -1,0 +1,17 @@
+# Binary
+/rpc-aggregator
+/cmd/aggregator/aggregator
+*.exe
+
+# Config (user config may contain secrets)
+config.yaml
+!config.example.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

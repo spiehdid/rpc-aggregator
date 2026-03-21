@@ -1,0 +1,141 @@
+server:
+  listen: ":8080"
+  admin_listen: ":8081"
+  request_timeout: 30s
+  drain_timeout: 30s
+
+health_check:
+  interval: 5s
+  timeout: 3s
+
+scoring:
+  weights:
+    latency: 0.4
+    block_height: 0.3
+    error_rate: 0.3
+    paid_penalty: 0.5       # cost multiplier for paid nodes (0.0-1.0)
+
+circuit_breaker:
+  error_threshold: 0.5
+  window: 30s
+  recovery_timeout: 30s
+
+retry:
+  max_attempts: 3
+  critical_fan_out: 3
+  max_batch_size: 100
+
+# Rate limiting (disabled by default)
+rate_limit:
+  enabled: false
+  default:
+    requests_per_second: 100
+    burst: 200
+  # api_keys:
+  #   - key: "sk-your-api-key"
+  #     name: "my-app"
+  #     requests_per_second: 500
+  #     burst: 1000
+
+# WebSocket settings
+websocket:
+  max_connections: 1000
+  max_subscriptions_per_conn: 100
+  max_total_subscriptions: 10000
+  max_message_size: 65536
+  send_queue_size: 256
+  write_timeout: 5s
+  ping_interval: 30s
+  pong_timeout: 10s
+
+chains:
+  ethereum:
+    adapter: evm
+    path: /eth
+    finalization: true
+    discovery:
+      enabled: true
+      chain_id: 1
+      interval: 30m
+    cache:
+      default_ttl: 5s
+      max_entries: 10000
+      rules:
+        - method: eth_chainId
+          ttl: 0s
+        - method: eth_blockNumber
+          ttl: 1s
+        - method: eth_getBlockByNumber
+          ttl: 0s
+          condition: finalized
+        - method: eth_getTransactionReceipt
+          ttl: 0s
+        - method: eth_gasPrice
+          ttl: 3s
+    nodes:
+      - url: https://eth.llamarpc.com
+        ws_url: wss://eth.llamarpc.com
+        weight: 1.0
+      - url: https://ethereum-rpc.publicnode.com
+        ws_url: wss://ethereum-rpc.publicnode.com
+        weight: 1.0
+      # Example paid node with daily budget:
+      # - url: https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
+      #   ws_url: wss://eth-mainnet.g.alchemy.com/v2/YOUR_KEY
+      #   weight: 1.0
+      #   tier: paid
+      #   budget:
+      #     daily_limit: 1000
+
+  polygon:
+    adapter: evm
+    path: /polygon
+    finalization: true
+    discovery:
+      enabled: true
+      chain_id: 137
+      interval: 30m
+    cache:
+      default_ttl: 5s
+      max_entries: 10000
+      rules:
+        - method: eth_chainId
+          ttl: 0s
+        - method: eth_blockNumber
+          ttl: 500ms
+        - method: eth_getBlockByNumber
+          ttl: 0s
+          condition: finalized
+        - method: eth_gasPrice
+          ttl: 3s
+    nodes:
+      - url: https://polygon.drpc.org
+        ws_url: wss://polygon.drpc.org
+        weight: 1.0
+      - url: https://polygon-bor-rpc.publicnode.com
+        ws_url: wss://polygon-bor-rpc.publicnode.com
+        weight: 1.0
+
+  solana:
+    adapter: solana
+    path: /solana
+    finalization: true
+    cache:
+      default_ttl: 1s
+      max_entries: 10000
+      rules:
+        - method: getGenesisHash
+          ttl: 0s
+        - method: getVersion
+          ttl: 0s
+        - method: getSlot
+          ttl: 400ms
+        - method: getBalance
+          ttl: 2s
+    nodes:
+      - url: https://api.mainnet-beta.solana.com
+        ws_url: wss://api.mainnet-beta.solana.com
+        weight: 1.0
+      - url: https://solana.drpc.org
+        ws_url: wss://solana.drpc.org
+        weight: 1.0

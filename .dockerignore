@@ -1,0 +1,6 @@
+.git
+*.exe
+*.md
+docs/
+tests/
+config.yaml
