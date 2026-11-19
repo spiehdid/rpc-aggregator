@@ -203,6 +203,101 @@ func (a *EVMAdapter) ParseResponse(raw []byte) (adapter.RPCResponse, error) {
 	return resp, nil
 }
 
+// ClassifyFailure separates node problems (blocked, rate-limited, broken) from request-specific
+// limitations (log range/size caps, missing method or archive state) and legitimate answers.
+func (a *EVMAdapter) ClassifyFailure(req adapter.RPCRequest, status int, body []byte) adapter.FailureKind {
+	isLogs := req.Method == "eth_getLogs"
+	switch {
+	case status == http.StatusTooManyRequests || status >= 500:
+		return adapter.FailureNode
+	case status == http.StatusRequestEntityTooLarge:
+		return adapter.FailureCapability
+	case status == http.StatusBadRequest && isLogs:
+		return adapter.FailureCapability // public nodes answer oversized log ranges with a bare 400
+	case status != http.StatusOK:
+		return adapter.FailureNode
+	}
+	var resp struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return adapter.FailureNode
+	}
+	if resp.Error == nil {
+		return adapter.FailureNone
+	}
+	code, msg := resp.Error.Code, strings.ToLower(resp.Error.Message)
+	switch {
+	case strings.HasPrefix(msg, "execution reverted"):
+		return adapter.FailureNone
+	case code == -32601 || containsAny(msg, "method not found", "method not available", "is not available",
+		"not supported", "unsupported method", "not whitelisted"):
+		return adapter.FailureCapability
+	case containsAny(msg, "missing trie node", "header not found", "pruned", "historical state", "state not available"):
+		return adapter.FailureCapability
+	// several public nodes answer an oversized log range with a bare -32602 "invalid params"
+	case isLogs && (code == -32005 || code == -32602 || containsAny(msg, "range", "too large", "exceed", "limit", "more than", "too many")):
+		return adapter.FailureCapability
+	case code == -32005 || containsAny(msg, "rate limit", "rate-limit", "too many requests", "capacity", "quota"):
+		return adapter.FailureNode
+	}
+	return adapter.FailureNone
+}
+
+// LogsSpan returns the inclusive number of blocks an eth_getLogs filter covers.
+func (a *EVMAdapter) LogsSpan(req adapter.RPCRequest, head uint64) (uint64, bool) {
+	if req.Method != "eth_getLogs" {
+		return 0, false
+	}
+	var params []struct {
+		FromBlock *string `json:"fromBlock"`
+		ToBlock   *string `json:"toBlock"`
+		BlockHash *string `json:"blockHash"`
+	}
+	if err := json.Unmarshal(req.Params, &params); err != nil || len(params) == 0 {
+		return 0, false
+	}
+	f := params[0]
+	if f.BlockHash != nil {
+		return 1, true
+	}
+	from, ok := resolveBlockTag(f.FromBlock, head)
+	if !ok {
+		return 0, false
+	}
+	to, ok := resolveBlockTag(f.ToBlock, head)
+	if !ok || to < from {
+		return 0, false
+	}
+	return to - from + 1, true
+}
+
+func resolveBlockTag(tag *string, head uint64) (uint64, bool) {
+	if tag == nil {
+		return head, head > 0
+	}
+	switch *tag {
+	case "latest", "pending", "safe", "finalized":
+		return head, head > 0
+	case "earliest":
+		return 0, true
+	}
+	n, err := strconv.ParseUint(strings.TrimPrefix(*tag, "0x"), 16, 64)
+	return n, err == nil
+}
+
+func containsAny(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
 func simpleKeyFunc(req adapter.RPCRequest) string { return req.Method }
 
 func paramsKeyFunc(req adapter.RPCRequest) string {

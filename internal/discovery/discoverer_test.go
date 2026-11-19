@@ -150,6 +150,30 @@ func TestDiscoverer_DiscoverChain_NoMatchingChainID(t *testing.T) {
 	}
 }
 
+func TestDiscoverer_SkipsURLsAlreadyConfigured(t *testing.T) {
+	var probes int
+	rpcServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		probes++
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"jsonrpc":"2.0","result":"0x100","id":1}`))
+	}))
+	defer rpcServer.Close()
+
+	p := newTestPool(t, "polygon")
+	p.AddNode("polygon-0", rpcServer.URL+"/", 1.0) // configured manually under its own ID, trailing slash
+
+	d := New(nil, metrics.New(prometheus.NewRegistry()))
+	chain := ChainDiscovery{ChainName: "polygon", ChainID: 137, Pool: p, Adapter: evm.New().WithClient(rpcServer.Client()), Interval: time.Minute}
+	d.discoverChain(context.Background(), chain, []chainEntry{{ChainID: 137, RPC: []string{rpcServer.URL}}})
+
+	if n := len(p.Nodes()); n != 1 {
+		t.Errorf("configured URL must not be added again: %d nodes", n)
+	}
+	if probes != 0 {
+		t.Errorf("configured URL must not be probed, got %d probes", probes)
+	}
+}
+
 func TestDiscoverer_DiscoverChain_HealthyNodeAdded(t *testing.T) {
 	// RPC server that responds with a valid block height via HTTPS.
 	rpcServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

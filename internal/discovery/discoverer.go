@@ -157,6 +157,9 @@ func (d *Discoverer) discoverChain(ctx context.Context, chain ChainDiscovery, en
 		if chain.Pool.GetNode(nodeID) != nil {
 			continue
 		}
+		if chain.Pool.HasURL(url) {
+			continue // already configured under another ID
+		}
 
 		checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		_, err := chain.Adapter.GetBlockHeight(checkCtx, url)

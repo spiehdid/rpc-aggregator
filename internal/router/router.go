@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -21,8 +22,8 @@ import (
 )
 
 const (
-	maxRequestBodySize      = 1 << 20 // 1MB
-	maxUpstreamResponseSize = 5 << 20 // 5MB
+	maxRequestBodySize      = 1 << 20  // 1MB
+	maxUpstreamResponseSize = 64 << 20 // 64MB; larger bodies are refused and retried elsewhere
 	defaultBatchConcurrency = 10
 )
 
@@ -46,6 +47,7 @@ type Router struct {
 	requestTimeout   time.Duration
 	client           *http.Client
 	batchConcurrency int
+	maxResponseSize  int64
 }
 
 func New(chains map[string]*ChainRoute, m *metrics.Metrics, maxRetries, criticalFanOut, maxBatchSize int, requestTimeout time.Duration) *Router {
@@ -62,6 +64,7 @@ func New(chains map[string]*ChainRoute, m *metrics.Metrics, maxRetries, critical
 			},
 		},
 		batchConcurrency: defaultBatchConcurrency,
+		maxResponseSize:  maxUpstreamResponseSize,
 	}
 	rt.maxRetries.Store(int32(maxRetries))
 	rt.criticalFanOut.Store(int32(criticalFanOut))
@@ -248,34 +251,99 @@ func (rt *Router) processSingleRequest(ctx context.Context, chain *ChainRoute, r
 	return respBytes
 }
 
+// sendWithRetry sends a read to the best node and moves on to the next one when the answer is a
+// node failure (blocked, rate-limited, broken) or a capability limit (log range/size caps, missing
+// method or archive state). Legitimate answers, including JSON-RPC errors like reverts, are returned
+// as-is. Log-range limits are learned per node so wide queries skip nodes that recently refused them.
 func (rt *Router) sendWithRetry(ctx context.Context, chain *ChainRoute, req adapter.RPCRequest, body []byte) []byte {
 	maxRetries := int(rt.maxRetries.Load())
 	excluded := make(map[string]bool)
+
+	span, hasSpan := uint64(0), false
+	if re, ok := chain.Adapter.(adapter.RangeExtractor); ok {
+		span, hasSpan = re.LogsSpan(req, chain.Pool.MaxBlockHeight())
+	}
+	if hasSpan {
+		now := time.Now()
+		limited := make(map[string]bool)
+		for _, n := range chain.Pool.Nodes() {
+			if n.RejectsLogsSpan(span, now) {
+				limited[n.ID] = true
+			}
+		}
+		// Prefer nodes without a known limit, but never strand the request: if every available
+		// node is limited, try them anyway (the limit may have been lifted).
+		if len(limited) > 0 && chain.Pool.SelectBestExcluding(limited) != nil {
+			excluded = limited
+		}
+	}
+
+	var lastRPCError []byte // last upstream JSON-RPC error body, returned if every attempt fails
 	for attempt := 0; attempt < maxRetries; attempt++ {
 		node := chain.Pool.SelectBestExcluding(excluded)
 		if node == nil {
-			rt.metrics.ChainUnavailable.WithLabelValues(chain.Name).Inc()
-			return makeRPCError(req.ID, -32603, "no healthy upstream nodes")
+			break
 		}
 		if node.Tier == "paid" && rt.budget != nil && !rt.budget.TryRecord(node.ID) {
 			excluded[node.ID] = true
 			continue // pick next node
 		}
-		respBytes, err := rt.doUpstreamRequest(ctx, chain.Name, node, body)
-		if err != nil {
-			slog.Debug("upstream failed", "chain", chain.Name, "node", node.ID, "error", err, "attempt", attempt+1)
-			excluded[node.ID] = true
-			node.CircuitBreaker().RecordError()
-			if attempt < maxRetries-1 {
-				rt.metrics.RetryTotal.WithLabelValues(chain.Name, req.Method).Inc()
+		respBytes, status, err := rt.doUpstreamRaw(ctx, chain.Name, node, body)
+		kind := rt.classify(chain, req, status, respBytes, err)
+		if kind == adapter.FailureNone {
+			node.CircuitBreaker().RecordSuccess()
+			if hasSpan && !isRPCErrorBody(respBytes) { // only real results prove the node serves this span
+				node.RecordLogsSpanSuccess(span)
 			}
-			continue
+			return respBytes
 		}
-		node.CircuitBreaker().RecordSuccess()
-		return respBytes
+		slog.Debug("upstream failed", "chain", chain.Name, "node", node.ID, "kind", kind, "status", status, "error", err, "attempt", attempt+1)
+		excluded[node.ID] = true
+		if kind == adapter.FailureNode {
+			node.CircuitBreaker().RecordError()
+		} else if hasSpan {
+			node.RecordLogsSpanFailure(span, time.Now())
+		}
+		if isRPCErrorBody(respBytes) {
+			lastRPCError = respBytes
+		}
+		if attempt < maxRetries-1 {
+			rt.metrics.RetryTotal.WithLabelValues(chain.Name, req.Method).Inc()
+		}
 	}
 	rt.metrics.ChainUnavailable.WithLabelValues(chain.Name).Inc()
+	if lastRPCError != nil {
+		return lastRPCError // e.g. "block range too large": lets the client split its query
+	}
+	if len(excluded) == 0 {
+		return makeRPCError(req.ID, -32603, "no healthy upstream nodes")
+	}
 	return makeRPCError(req.ID, -32603, "all upstream nodes failed")
+}
+
+// classify decides whether an upstream answer is usable, a node failure or a capability limit.
+func (rt *Router) classify(chain *ChainRoute, req adapter.RPCRequest, status int, body []byte, err error) adapter.FailureKind {
+	switch {
+	case errors.Is(err, errResponseTooLarge):
+		return adapter.FailureCapability
+	case err != nil:
+		return adapter.FailureNode
+	}
+	if fc, ok := chain.Adapter.(adapter.FailureClassifier); ok {
+		return fc.ClassifyFailure(req, status, body)
+	}
+	if status >= 500 || status == http.StatusTooManyRequests {
+		return adapter.FailureNode
+	}
+	return adapter.FailureNone
+}
+
+func isRPCErrorBody(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	var resp adapter.RPCResponse
+	return json.Unmarshal(b, &resp) == nil && resp.Error != nil
 }
 
 func (rt *Router) sendToNode(ctx context.Context, chain *ChainRoute, req adapter.RPCRequest, body []byte, excluded map[string]bool) []byte {
@@ -364,31 +432,51 @@ func (rt *Router) fanOut(ctx context.Context, chain *ChainRoute, req adapter.RPC
 	return makeRPCError(req.ID, -32603, "all upstream nodes failed")
 }
 
+var errResponseTooLarge = errors.New("upstream response exceeds size limit")
+
+// doUpstreamRequest is the strict variant used by fan-out and mutating sends: 5xx/429 and
+// oversized bodies are errors, everything else is returned as-is.
 func (rt *Router) doUpstreamRequest(ctx context.Context, chainName string, node *pool.Node, body []byte) ([]byte, error) {
+	respBody, status, err := rt.doUpstreamRaw(ctx, chainName, node, body)
+	if err != nil {
+		return nil, err
+	}
+	if status >= 500 || status == http.StatusTooManyRequests {
+		return nil, fmt.Errorf("upstream returned %d", status)
+	}
+	return respBody, nil
+}
+
+// doUpstreamRaw returns the body and HTTP status of any completed exchange; err is set only for
+// transport failures and for bodies larger than the limit (never silently truncated).
+func (rt *Router) doUpstreamRaw(ctx context.Context, chainName string, node *pool.Node, body []byte) ([]byte, int, error) {
 	start := time.Now()
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, node.URL, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	resp, err := rt.client.Do(httpReq)
 	if err != nil {
 		rt.metrics.UpstreamRequests.WithLabelValues(chainName, node.ID, "error").Inc()
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 	rt.metrics.UpstreamLatency.WithLabelValues(chainName, node.ID).Observe(time.Since(start).Seconds())
-	if resp.StatusCode >= 500 || resp.StatusCode == 429 {
-		rt.metrics.UpstreamRequests.WithLabelValues(chainName, node.ID, "error").Inc()
-		return nil, fmt.Errorf("upstream returned %d", resp.StatusCode)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, rt.maxResponseSize+1))
+	if err == nil && int64(len(respBody)) > rt.maxResponseSize {
+		err = errResponseTooLarge
 	}
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxUpstreamResponseSize))
 	if err != nil {
 		rt.metrics.UpstreamRequests.WithLabelValues(chainName, node.ID, "error").Inc()
-		return nil, err
+		return nil, resp.StatusCode, err
 	}
-	rt.metrics.UpstreamRequests.WithLabelValues(chainName, node.ID, "success").Inc()
-	return respBody, nil
+	result := "success"
+	if resp.StatusCode >= 400 {
+		result = "error"
+	}
+	rt.metrics.UpstreamRequests.WithLabelValues(chainName, node.ID, result).Inc()
+	return respBody, resp.StatusCode, nil
 }
 
 func extractCondition(req adapter.RPCRequest) string {

@@ -55,6 +55,9 @@ type NodeStatus struct {
 	ErrorRate   float64 `json:"error_rate"`
 	Score       float64 `json:"score"`
 	Circuit     string  `json:"circuit"`
+	// learned eth_getLogs block-range limits: widest served span, and the refused span still trusted (0 = none)
+	LogsMaxOKSpan uint64 `json:"logs_max_ok_span"`
+	LogsFailSpan  uint64 `json:"logs_fail_span"`
 }
 
 type CacheStatsResp struct {
@@ -170,6 +173,7 @@ func (a *API) handleStatus(w http.ResponseWriter, r *http.Request) {
 				ID: n.ID, URL: n.URL, BlockHeight: n.GetBlockHeight(),
 				LatencyMs: n.GetLatency().Milliseconds(), ErrorRate: n.ErrorRate(),
 				Score: score, Circuit: n.CircuitState().String(),
+				LogsMaxOKSpan: n.MaxOKLogsSpan(), LogsFailSpan: n.LogsFailSpan(time.Now()),
 			})
 		}
 		stats := info.Cache.Stats()
@@ -241,6 +245,7 @@ func (a *API) listNodes(w http.ResponseWriter, info ChainInfo) {
 		statuses = append(statuses, NodeStatus{
 			ID: n.ID, URL: n.URL, BlockHeight: n.GetBlockHeight(),
 			LatencyMs: n.GetLatency().Milliseconds(), ErrorRate: n.ErrorRate(), Circuit: n.CircuitState().String(),
+			LogsMaxOKSpan: n.MaxOKLogsSpan(), LogsFailSpan: n.LogsFailSpan(time.Now()),
 		})
 	}
 	w.Header().Set("Content-Type", "application/json")

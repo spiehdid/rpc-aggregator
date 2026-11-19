@@ -25,6 +25,22 @@ A high-performance RPC aggregator that transparently proxies JSON-RPC requests a
 - **Hot reload** — config changes picked up without restart
 - **Docker** — one-command launch with docker-compose (aggregator + Prometheus)
 
+## Retry classification and log-range learning
+
+Reads are retried on another node depending on what the upstream answered (EVM adapter):
+
+| Upstream answer | Treated as | Effect |
+|---|---|---|
+| Result, or a legitimate JSON-RPC error (`execution reverted`, bad params on non-log calls) | usable | returned to the client |
+| Transport error, 5xx, 429, 401/403/404, non-JSON body, rate-limit errors | node failure | retried elsewhere, counts against the circuit breaker |
+| `eth_getLogs` range/size refusals (400, 413, `-32602`, `-32005`, "range"/"limit"/"exceed" messages), method not available, pruned state, body over 64MB | capability limit | retried elsewhere, node stays healthy |
+
+For `eth_getLogs` the router computes the query's block span and remembers, per node, the widest span
+served and the narrowest span refused (trusted for 10 minutes). Wide queries skip nodes that recently
+refused that width; if every node refuses, the client gets the upstream's own error (e.g. `range 99999
+exceeds limit of 10000`) so it can split the query. Learned limits are shown in `/admin/status` as
+`logs_max_ok_span` / `logs_fail_span`. Discovery skips URLs that are already configured.
+
 ## Architecture
 
 ```

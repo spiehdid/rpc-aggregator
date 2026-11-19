@@ -3,6 +3,7 @@ package pool
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -89,6 +90,33 @@ func (p *NodePool) UpdateWeight(id string, weight float64) error {
 	}
 	node.SetWeight(weight)
 	return nil
+}
+
+// HasURL reports whether any node (configured or discovered) already points at url,
+// ignoring a trailing slash.
+func (p *NodePool) HasURL(url string) bool {
+	want := strings.TrimRight(url, "/")
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, n := range p.nodes {
+		if strings.TrimRight(n.URL, "/") == want {
+			return true
+		}
+	}
+	return false
+}
+
+// MaxBlockHeight is the highest block any node has reported (0 if unknown).
+func (p *NodePool) MaxBlockHeight() uint64 {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	var h uint64
+	for _, n := range p.nodes {
+		if nh := n.GetBlockHeight(); nh > h {
+			h = nh
+		}
+	}
+	return h
 }
 
 func (p *NodePool) FinalizedHeight() uint64 {

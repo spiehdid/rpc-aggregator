@@ -31,6 +31,43 @@ type MethodClassification struct {
 	Mutating     bool
 }
 
+// FailureKind classifies an upstream response for retry decisions.
+type FailureKind int
+
+const (
+	// FailureNone: the response is usable as-is, including legitimate JSON-RPC errors (e.g. reverts).
+	FailureNone FailureKind = iota
+	// FailureNode: the node is unhealthy or rejecting us; retry elsewhere and count it against the circuit breaker.
+	FailureNode
+	// FailureCapability: the node can't serve this particular request (range/size limits, method or
+	// archive state unavailable); retry elsewhere but keep the node healthy.
+	FailureCapability
+)
+
+func (k FailureKind) String() string {
+	switch k {
+	case FailureNone:
+		return "none"
+	case FailureNode:
+		return "node"
+	case FailureCapability:
+		return "capability"
+	}
+	return "unknown"
+}
+
+// FailureClassifier is optionally implemented by adapters that can tell node failures from
+// request-specific limitations. Adapters without it only treat 5xx/429 as failures.
+type FailureClassifier interface {
+	ClassifyFailure(req RPCRequest, status int, body []byte) FailureKind
+}
+
+// RangeExtractor is optionally implemented by adapters whose log queries have per-node block-range limits.
+type RangeExtractor interface {
+	// LogsSpan returns how many blocks a log query covers; head resolves block tags like "latest".
+	LogsSpan(req RPCRequest, head uint64) (uint64, bool)
+}
+
 type ChainAdapter interface {
 	Name() string
 	ParseRequest(raw []byte) (RPCRequest, error)
