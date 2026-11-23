@@ -112,3 +112,47 @@ func TestCache_Stats(t *testing.T) {
 		t.Errorf("Misses = %d, want 1", stats.Misses)
 	}
 }
+
+func TestCache_ByteLimitEvictsOldest(t *testing.T) {
+	c := New(100)
+	c.SetMaxBytes(10)
+	c.Set("a", []byte("aaaaaa"), 5*time.Second)
+	c.Set("b", []byte("bbbbbb"), 5*time.Second)
+	if _, ok := c.Get("a"); ok {
+		t.Error("expected oldest entry evicted once total bytes exceed the limit")
+	}
+	if _, ok := c.Get("b"); !ok {
+		t.Error("expected newest entry kept")
+	}
+	if got := c.Stats().Bytes; got != 6 {
+		t.Errorf("bytes = %d, want 6", got)
+	}
+}
+
+func TestCache_ByteLimitSkipsOversizedValue(t *testing.T) {
+	c := New(100)
+	c.SetMaxBytes(10)
+	c.Set("small", []byte("ok"), 5*time.Second)
+	c.Set("big", []byte("01234567890"), 5*time.Second)
+	if _, ok := c.Get("big"); ok {
+		t.Error("a single value larger than the byte limit must not be cached")
+	}
+	if _, ok := c.Get("small"); !ok {
+		t.Error("an oversized value must not evict existing entries")
+	}
+}
+
+func TestCache_ByteAccountingOnOverwriteAndExpiry(t *testing.T) {
+	c := New(100)
+	c.SetMaxBytes(100)
+	c.Set("k", []byte("1234"), 50*time.Millisecond)
+	c.Set("k", []byte("12345678"), 50*time.Millisecond)
+	if got := c.Stats().Bytes; got != 8 {
+		t.Errorf("bytes after overwrite = %d, want 8", got)
+	}
+	time.Sleep(60 * time.Millisecond)
+	c.Get("k")
+	if got := c.Stats().Bytes; got != 0 {
+		t.Errorf("bytes after expiry = %d, want 0", got)
+	}
+}

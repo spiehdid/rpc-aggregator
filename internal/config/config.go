@@ -102,7 +102,9 @@ func (c ChainConfig) IsFinalizationEnabled() bool {
 type CacheConfig struct {
 	DefaultTTL time.Duration `yaml:"default_ttl"`
 	MaxEntries int           `yaml:"max_entries"`
-	Rules      []CacheRule   `yaml:"rules"`
+	// MaxBytes bounds the summed size of cached responses (0 = no byte limit).
+	MaxBytes int64       `yaml:"max_bytes"`
+	Rules    []CacheRule `yaml:"rules"`
 }
 
 type CacheRule struct {

@@ -105,6 +105,9 @@ func main() {
 		}
 
 		c := cache.New(chainCfg.Cache.MaxEntries)
+		if chainCfg.Cache.MaxBytes > 0 {
+			c.SetMaxBytes(chainCfg.Cache.MaxBytes)
+		}
 		var rules []cache.Rule
 		for _, r := range chainCfg.Cache.Rules {
 			rules = append(rules, cache.Rule{Method: r.Method, TTL: r.TTL, Condition: r.Condition})

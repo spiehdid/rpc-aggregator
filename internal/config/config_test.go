@@ -355,3 +355,29 @@ chains:
 		}
 	})
 }
+
+func TestLoadConfig_CacheMaxBytes(t *testing.T) {
+	yaml := `
+chains:
+  ethereum:
+    adapter: evm
+    path: /eth
+    cache:
+      default_ttl: 2s
+      max_entries: 1000
+      max_bytes: 268435456
+    nodes:
+      - url: https://rpc1.example.com
+        weight: 1.0
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.yaml")
+	os.WriteFile(path, []byte(yaml), 0644)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	if got := cfg.Chains["ethereum"].Cache.MaxBytes; got != 268435456 {
+		t.Errorf("MaxBytes = %d, want 268435456", got)
+	}
+}
